@@ -1,0 +1,5 @@
+{
+  "name": "Hangzhou 3D Map Explorer",
+  "description": "A high-performance 3D map viewer for Hangzhou City using Mapbox GL JS, featuring building extrusion, landmark navigation, and adjustable view settings.",
+  "requestFramePermissions": []
+}
