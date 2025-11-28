@@ -46,14 +46,13 @@ const MapContainer: React.FC<MapContainerProps> = ({
       try {
         mapboxgl.accessToken = MAPBOX_TOKEN;
         
-        // Disable telemetry to prevent frame access issues
+        // Disable telemetry
         if (mapboxgl.config) {
              mapboxgl.config.SEND_EVENTS = false;
-             mapboxgl.config.API_URL = 'https://api.mapbox.com';
         }
         mapboxgl.prewarm = false;
 
-        // WORKAROUND: Create a local worker blob to bypass Cross-Origin restrictions in iframes
+        // CSP Worker workaround
         if (!mapboxgl.workerUrl) {
            try {
                const workerResponse = await fetch('https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl-csp-worker.js');
@@ -61,7 +60,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
                const blob = new Blob([workerText], { type: 'application/javascript' });
                mapboxgl.workerUrl = window.URL.createObjectURL(blob);
            } catch (e) {
-               console.warn("Failed to create local worker blob, using default CDN", e);
+               console.warn("Failed to create local worker blob", e);
            }
         }
 
@@ -80,31 +79,18 @@ const MapContainer: React.FC<MapContainerProps> = ({
               maxBounds: HANGZHOU_BOUNDS,
               minZoom: 10,
               attributionControl: false,
-              trackResize: true, 
-              crossSourceCollisions: false
+              trackResize: true
             });
         } catch (constructError: any) {
-             const msg = constructError.message || '';
-             if (msg.includes('Blocked a frame') || msg.includes('Location')) {
-                 if (mounted) {
-                    setError("Mapbox cannot load in this secure preview frame. Please try opening the page directly.");
-                    setInitializing(false);
-                 }
-                 return;
-             } else {
-                 console.error("Unknown map construction error:", constructError);
-                 if (mounted) {
-                    setError("Failed to initialize map engine: " + msg);
-                    setInitializing(false);
-                 }
-                 return;
+             console.error("Map construction error:", constructError);
+             if (mounted) {
+                setError("Failed to initialize map: " + constructError.message);
+                setInitializing(false);
              }
+             return;
         }
 
-        if (!map) {
-            setInitializing(false);
-            return;
-        }
+        if (!map) return;
 
         mapRef.current = map;
         map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
@@ -115,49 +101,11 @@ const MapContainer: React.FC<MapContainerProps> = ({
           if (!mounted) return;
           setMapLoaded(true);
           setInitializing(false);
-          add3DBuildings(map);
-          addPriceLayer(map, showPrices);
-          updateFog(map, styleId);
-        });
-
-        // Add interaction for price blocks
-        map.on('click', 'community-blocks', (e: any) => {
-          if (!e.features || e.features.length === 0) return;
           
-          const coordinates = e.lngLat;
-          const { formattedPrice, name } = e.features[0].properties;
-
-          new mapboxgl.Popup({ offset: 25, className: 'custom-popup', closeButton: false })
-            .setLngLat(coordinates)
-            .setHTML(`
-              <div class="px-3 py-2 text-gray-800 bg-white rounded shadow-sm min-w-[140px]">
-                <h3 class="font-bold text-sm mb-1 text-gray-900 border-b pb-1">${name}</h3>
-                <div class="flex items-center justify-between mt-1">
-                  <span class="text-xs text-gray-500">Price:</span>
-                  <span class="font-mono text-blue-600 font-bold text-sm">${formattedPrice}</span>
-                </div>
-              </div>
-            `)
-            .addTo(map);
-        });
-
-        // Change cursor on hover
-        map.on('mouseenter', 'community-blocks', () => {
-          map.getCanvas().style.cursor = 'pointer';
-        });
-        map.on('mouseleave', 'community-blocks', () => {
-          map.getCanvas().style.cursor = '';
-        });
-
-        map.on('error', (e: any) => {
-          const msg = e.error?.message || '';
-          if (msg.includes('Location') || msg.includes('SecurityError') || msg.includes('Blocked a frame')) {
-              return;
-          }
-          if (mounted && !mapLoaded) {
-             setError("Failed to load map data. Check connection.");
-             setInitializing(false);
-          }
+          addPriceSource(map);
+          setup3DBuildings(map);
+          updateBuildingStyle(map, showPrices);
+          updateFog(map, styleId);
         });
 
         map.on('move', () => {
@@ -183,9 +131,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
     return () => {
       mounted = false;
       if (mapRef.current) {
-         try {
-           mapRef.current.remove();
-         } catch(e) { }
+         try { mapRef.current.remove(); } catch(e) {}
       }
       mapRef.current = null;
     };
@@ -199,183 +145,152 @@ const MapContainer: React.FC<MapContainerProps> = ({
     
     const onStyleData = () => {
         if (!mapRef.current) return;
-        try {
-            if (map.isStyleLoaded()) {
-               if (!map.getLayer('3d-buildings')) {
-                 add3DBuildings(map);
-               }
-               // Re-add price layer after style switch because switch removes all layers
-               addPriceLayer(map, showPrices);
-               updateFog(map, styleId);
-            }
-        } catch(e) { console.warn("Style update error", e); }
+        if (map.isStyleLoaded()) {
+           // Re-apply layers and sources after style switch
+           addPriceSource(map);
+           setup3DBuildings(map);
+           updateBuildingStyle(map, showPrices);
+           updateFog(map, styleId);
+        }
     };
 
-    try {
-        map.setStyle(styleId);
-        map.once('styledata', onStyleData);
-    } catch(e) {
-        console.warn("Failed to set style", e);
-    }
-
+    map.setStyle(styleId);
+    map.once('styledata', onStyleData);
   }, [styleId]);
 
-  // Handle Landmark Selection (FlyTo)
+  // Handle Landmark Selection
   useEffect(() => {
     if (!mapRef.current || !selectedLandmark) return;
-    try {
-        mapRef.current.flyTo({
-          center: [selectedLandmark.coordinates.lng, selectedLandmark.coordinates.lat],
-          zoom: selectedLandmark.zoom,
-          bearing: selectedLandmark.bearing,
-          pitch: selectedLandmark.pitch,
-          duration: 2000,
-          essential: true
-        });
-    } catch(e) {}
+    mapRef.current.flyTo({
+      center: [selectedLandmark.coordinates.lng, selectedLandmark.coordinates.lat],
+      zoom: selectedLandmark.zoom,
+      bearing: selectedLandmark.bearing,
+      pitch: selectedLandmark.pitch,
+      duration: 2000,
+      essential: true
+    });
   }, [selectedLandmark]);
 
-  // Handle Price Layer Visibility
+  // Handle Price Toggle (Dynamic Styling)
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return;
     const map = mapRef.current;
     
-    // We check both layer and source existence
-    if (map.getLayer('community-blocks')) {
-      map.setLayoutProperty(
-        'community-blocks', 
-        'visibility', 
-        showPrices ? 'visible' : 'none'
-      );
-    } else if (showPrices && map.getSource('communities')) {
-      // If layer missing but source exists, re-add layer (rare race condition)
-      addPriceLayer(map, true);
+    updateBuildingStyle(map, showPrices);
+    
+    // Toggle labels
+    if (map.getLayer('community-labels')) {
+      map.setLayoutProperty('community-labels', 'visibility', showPrices ? 'visible' : 'none');
     }
   }, [showPrices, mapLoaded]);
 
   const updateFog = (map: any, style: MapStyle) => {
-      try {
-          if (style.includes('night') || style.includes('satellite') || style.includes('dark')) {
-            map.setFog({
-                'range': [0.8, 8],
-                'color': '#242b4b',
-                'horizon-blend': 0.1,
-            });
-          } else {
-            map.setFog({
-                "range": [0.5, 10],
-                "color": "#ffffff",
-                "horizon-blend": 0.2
-            }); 
-          }
-      } catch (e) { }
+      if (style.includes('night') || style.includes('satellite') || style.includes('dark')) {
+        map.setFog({ 'range': [0.8, 8], 'color': '#242b4b', 'horizon-blend': 0.1 });
+      } else {
+        map.setFog({ "range": [0.5, 10], "color": "#ffffff", "horizon-blend": 0.2 }); 
+      }
   };
 
-  const addPriceLayer = (map: any, isVisible: boolean) => {
-    try {
-      if (!map.getSource('communities')) {
-         map.addSource('communities', {
-           type: 'geojson',
-           data: COMMUNITY_DATA
-         });
-      }
-
-      if (!map.getLayer('community-blocks')) {
-        map.addLayer({
-          'id': 'community-blocks',
-          'type': 'fill-extrusion',
-          'source': 'communities',
-          'layout': {
-            'visibility': isVisible ? 'visible' : 'none'
-          },
-          'paint': {
-            // Height based on price: price * 0.005 (e.g., 50k -> 250m)
-            'fill-extrusion-height': [
-               '*', ['get', 'price'], 0.005
-            ],
-            // Color ramp: Green (30k) -> Yellow (60k) -> Red (100k+)
-            'fill-extrusion-color': [
-              'interpolate',
-              ['linear'],
-              ['get', 'price'],
-              30000, '#10b981', // Emerald 500 (Cheap)
-              60000, '#eab308', // Yellow 500 (Mid)
-              100000, '#ef4444', // Red 500 (Expensive)
-              140000, '#7f1d1d'  // Dark Red (Luxury)
-            ],
-            'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': 0.9
-          }
-        });
-      } else {
-        // If layer exists, ensure visibility match
-        map.setLayoutProperty('community-blocks', 'visibility', isVisible ? 'visible' : 'none');
-      }
-    } catch (e) {
-      console.warn("Could not add price layer", e);
+  const addPriceSource = (map: any) => {
+    if (!map.getSource('communities')) {
+       map.addSource('communities', { type: 'geojson', data: COMMUNITY_DATA });
+    }
+    
+    // Add text labels for prices
+    if (!map.getLayer('community-labels')) {
+      map.addLayer({
+        'id': 'community-labels',
+        'type': 'symbol',
+        'source': 'communities',
+        'layout': {
+          'text-field': ['get', 'formattedPrice'],
+          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+          'text-size': 12,
+          'text-offset': [0, -1.5],
+          'text-anchor': 'bottom',
+          'visibility': 'visible'
+        },
+        'paint': {
+          'text-color': '#ffffff',
+          'text-halo-color': '#000000',
+          'text-halo-width': 2
+        }
+      });
     }
   };
 
-  const add3DBuildings = (map: any) => {
-    try {
-      const style = map.getStyle();
-      if (!style || !style.layers) return; 
+  const setup3DBuildings = (map: any) => {
+    const style = map.getStyle();
+    if (!style || !style.layers) return; 
 
-      const layers = style.layers;
-      let labelLayerId;
+    // Find where to insert the layer
+    let labelLayerId;
+    for (const layer of style.layers) {
+        if (layer.type === 'symbol' && layer.layout?.['text-field']) {
+            labelLayerId = layer.id;
+            break;
+        }
+    }
+
+    // Ensure the 3d-buildings layer exists
+    if (!map.getLayer('3d-buildings')) {
+        map.addLayer(
+            {
+                'id': '3d-buildings',
+                'source': 'composite',
+                'source-layer': 'building',
+                'filter': ['==', 'extrude', 'true'],
+                'type': 'fill-extrusion',
+                'minzoom': 13,
+                'paint': {
+                    'fill-extrusion-opacity': 0.8
+                }
+            },
+            labelLayerId
+        );
+    }
+  };
+
+  const updateBuildingStyle = (map: any, showPrices: boolean) => {
+    if (!map.getLayer('3d-buildings')) return;
+
+    if (showPrices) {
+      // PRICE MODE: 
+      // 1. Color buildings based on their height (Proxy for value/price)
+      // 2. Exaggerate height slightly to make the "Bar Chart" effect clearer
+      map.setPaintProperty('3d-buildings', 'fill-extrusion-color', [
+        'interpolate', ['linear'], ['get', 'height'],
+        0, '#374151',      // Low/Podium -> Dark Gray
+        30, '#10b981',     // 30m -> Green (Affordable)
+        80, '#eab308',     // 80m -> Yellow (Mid-range)
+        200, '#ef4444',    // 200m -> Red (High Value)
+        400, '#7f1d1d'     // 400m -> Deep Red (Luxury/Landmark)
+      ]);
+
+      map.setPaintProperty('3d-buildings', 'fill-extrusion-height', [
+        '*', ['get', 'height'], 1.2 // 20% height boost for dramatic effect
+      ]);
       
-      for (const layer of layers) {
-          if (layer.type === 'symbol' && layer.layout?.['text-field']) {
-              labelLayerId = layer.id;
-              break;
-          }
-      }
+      map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', 0.9);
 
-      if (!map.getLayer('3d-buildings')) {
-          map.addLayer(
-              {
-                  'id': '3d-buildings',
-                  'source': 'composite',
-                  'source-layer': 'building',
-                  'filter': ['==', 'extrude', 'true'],
-                  'type': 'fill-extrusion',
-                  'minzoom': 13,
-                  'paint': {
-                      'fill-extrusion-color': [
-                          'interpolate',
-                          ['linear'],
-                          ['get', 'height'],
-                          0, '#2a2a2a',    
-                          50, '#4a4a4a',    
-                          100, '#5a7a9a',   
-                          300, '#8ab4d4'    
-                      ],
-                      'fill-extrusion-height': [
-                          'interpolate',
-                          ['linear'],
-                          ['zoom'],
-                          13,
-                          0,
-                          13.05,
-                          ['get', 'height']
-                      ],
-                      'fill-extrusion-base': [
-                          'interpolate',
-                          ['linear'],
-                          ['zoom'],
-                          13,
-                          0,
-                          13.05,
-                          ['get', 'min_height']
-                      ],
-                      'fill-extrusion-opacity': 0.5 // Reduce opacity to let price blocks stand out
-                  }
-              },
-              labelLayerId
-          );
-      }
-    } catch (e) {
-      console.warn("Could not add 3D buildings", e);
+    } else {
+      // NORMAL MODE: Standard visual style
+      map.setPaintProperty('3d-buildings', 'fill-extrusion-color', [
+        'interpolate', ['linear'], ['get', 'height'],
+        0, '#2a2a2a',
+        50, '#4a4a4a',
+        100, '#5a7a9a',
+        300, '#8ab4d4'
+      ]);
+      
+      map.setPaintProperty('3d-buildings', 'fill-extrusion-height', [
+         'interpolate', ['linear'], ['zoom'],
+         13, 0,
+         13.05, ['get', 'height']
+      ]);
+
+      map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', 0.6);
     }
   };
 
@@ -384,25 +299,9 @@ const MapContainer: React.FC<MapContainerProps> = ({
       {error && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-50 text-red-400 p-8 text-center">
           <div className="max-w-md bg-black/50 p-6 rounded-xl border border-red-900/50 backdrop-blur-sm">
-            <h3 className="text-xl font-bold mb-2 text-white">Map Initialization Failed</h3>
+            <h3 className="text-xl font-bold mb-2">Map Error</h3>
             <p className="mb-4 text-sm opacity-90">{error}</p>
-            <div className="p-3 bg-red-900/20 rounded text-xs text-left mb-4 font-mono">
-                Common fix: Click "Open in new tab" or run this project locally without iframe restrictions.
-            </div>
-            <button 
-                onClick={() => window.location.reload()} 
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded transition text-sm font-medium"
-            >
-                Retry Loading
-            </button>
-          </div>
-        </div>
-      )}
-      {initializing && !error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-50 text-white pointer-events-none">
-          <div className="animate-pulse flex flex-col items-center">
-            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-            <p className="font-mono text-sm text-blue-300">Initializing 3D Engine...</p>
+            <button onClick={() => window.location.reload()} className="px-6 py-2 bg-blue-600 rounded">Reload</button>
           </div>
         </div>
       )}

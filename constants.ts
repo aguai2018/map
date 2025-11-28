@@ -68,29 +68,19 @@ export const MAP_STYLES = [
   { id: MapStyle.STREETS, name: 'Streets', icon: '🛣️' },
 ];
 
-// Helper to generate a square polygon (Block) around a point
-const createBlockFeature = (lng: number, lat: number, name: string, price: number) => {
-  // Size of the block in degrees (approx 150m-200m)
-  const size = 0.0015;
-  const half = size / 2;
-
+// Helper to generate a Point feature for a community
+const createCommunityPoint = (lng: number, lat: number, name: string, price: number) => {
   return {
     type: 'Feature',
     properties: {
       name,
-      price, // numeric price for height scaling
-      formattedPrice: `¥${(price / 10000).toFixed(1)}万/㎡`, // string for display
-      height: price * 0.005, // pre-calculate height scaling if needed, though we do it in style
+      price,
+      formattedPrice: `¥${(price / 10000).toFixed(1)}万`, // Short format for labels
+      fullPrice: `¥${(price / 10000).toFixed(1)}万/㎡`
     },
     geometry: {
-      type: 'Polygon',
-      coordinates: [[
-        [lng - half, lat - half],
-        [lng + half, lat - half],
-        [lng + half, lat + half],
-        [lng - half, lat + half],
-        [lng - half, lat - half]
-      ]]
+      type: 'Point',
+      coordinates: [lng, lat]
     }
   };
 };
@@ -123,5 +113,5 @@ const communities = [
 
 export const COMMUNITY_DATA = {
   type: 'FeatureCollection',
-  features: communities.map(c => createBlockFeature(c.lng, c.lat, c.name, c.price))
+  features: communities.map(c => createCommunityPoint(c.lng, c.lat, c.name, c.price))
 };

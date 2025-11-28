@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, ExternalLink } from 'lucide-react';
 
 interface Props {
@@ -10,7 +10,7 @@ interface State {
   error: Error | null;
 }
 
-class ErrorBoundary extends Component<Props, State> {
+class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
     this.state = {
@@ -19,15 +19,15 @@ class ErrorBoundary extends Component<Props, State> {
     };
   }
 
-  public static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error in component:', error, errorInfo);
   }
 
-  public render() {
+  render() {
     if (this.state.hasError) {
       const isSecurityError = this.state.error?.message?.includes('Blocked a frame') || 
                             this.state.error?.message?.includes('Location') ||
@@ -66,7 +66,7 @@ class ErrorBoundary extends Component<Props, State> {
               </div>
             ) : (
               <button
-                onClick={() => this.setState({ hasError: false })}
+                onClick={() => this.setState({ hasError: false, error: null })}
                 className="px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors"
               >
                 Try Again
