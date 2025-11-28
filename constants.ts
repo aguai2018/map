@@ -15,11 +15,11 @@ export const HANGZHOU_BOUNDS: [[number, number], [number, number]] = [
 ];
 
 export const DEFAULT_VIEW_STATE = {
-  lng: 120.2109,
-  lat: 30.2442,
-  zoom: 13.5,
-  pitch: 60,
-  bearing: -20
+  lng: 120.19,
+  lat: 30.25,
+  zoom: 13,
+  pitch: 55,
+  bearing: -10
 };
 
 export const LANDMARKS: Landmark[] = [
@@ -77,6 +77,38 @@ export const MAP_STYLES = [
   { id: MapStyle.STREETS, name: 'Streets', icon: '🛣️' },
 ];
 
+// --- SimCity Logic: Facilities & Amenities ---
+// These facilities boost local land value
+export const FACILITIES = [
+  // Hospitals 🏥
+  { name: "浙一医院 (First Affiliated)", type: "Hospital", icon: "🏥", boost: 15000, radius: 2.0, lng: 120.18, lat: 30.25 },
+  { name: "邵逸夫医院 (Sir Run Run Shaw)", type: "Hospital", icon: "🏥", boost: 18000, radius: 2.5, lng: 120.205, lat: 30.26 },
+  
+  // Schools 🎓 (Education districts are expensive!)
+  { name: "浙江大学 (ZJU Yuquan)", type: "School", icon: "🎓", boost: 25000, radius: 1.5, lng: 120.125, lat: 30.263 },
+  { name: "杭州高级中学 (Hangzhou High)", type: "School", icon: "🎓", boost: 30000, radius: 1.2, lng: 120.17, lat: 30.255 },
+  { name: "学军中学 (Xuejun High)", type: "School", icon: "🎓", boost: 28000, radius: 1.2, lng: 120.135, lat: 30.275 },
+  
+  // Government ⚖️
+  { name: "市民中心 (Citizen Center)", type: "Gov", icon: "⚖️", boost: 12000, radius: 3.0, lng: 120.212, lat: 30.245 },
+  { name: "省政府 (Provincial Gov)", type: "Gov", icon: "⚖️", boost: 10000, radius: 2.0, lng: 120.155, lat: 30.265 },
+];
+
+export const FACILITIES_GEOJSON = {
+  type: 'FeatureCollection',
+  features: FACILITIES.map((f, i) => ({
+    type: 'Feature',
+    id: `fac-${i}`,
+    properties: {
+      name: f.name,
+      type: f.type,
+      icon: f.icon,
+      description: `Impact: +¥${f.boost} within ${f.radius}km`
+    },
+    geometry: { type: 'Point', coordinates: [f.lng, f.lat] }
+  }))
+};
+
 // Helper to calculate distance between two points (Haversine approx for simple weighting)
 const getDistance = (lng1: number, lat1: number, lng2: number, lat2: number) => {
   const R = 6371; // km
@@ -89,24 +121,21 @@ const getDistance = (lng1: number, lat1: number, lng2: number, lat2: number) => 
   return R * c;
 };
 
-// Procedurally generate City-Wide Data
+// Procedurally generate City-Wide Data using "SimCity" land value logic
 const generateCityWideData = () => {
   const features = [];
   
   // Grid settings
   const latStart = 30.12;
-  const latEnd = 30.40;
-  const lngStart = 119.95;
+  const latEnd = 30.38;
+  const lngStart = 120.00;
   const lngEnd = 120.35;
-  const step = 0.006; // Density of grid (~600m spacing)
+  const step = 0.0055; // Approx 500m grid
 
-  // Economic Centers (Hotspots)
+  // Economic Centers (Base Macro Value)
   const centers = [
-    { lng: 120.2109, lat: 30.2442, basePrice: 120000, decay: 0.3 }, // CBD
-    { lng: 120.1468, lat: 30.2476, basePrice: 110000, decay: 0.25 }, // West Lake
-    { lng: 120.2155, lat: 30.1834, basePrice: 85000, decay: 0.35 },  // Binjiang
-    { lng: 120.0636, lat: 30.2608, basePrice: 70000, decay: 0.4 },   // Xixi/Future Sci-Tech
-    { lng: 120.2900, lat: 30.3000, basePrice: 45000, decay: 0.5 },   // Xiasha (Univ City)
+    { lng: 120.2109, lat: 30.2442, basePrice: 90000, decay: 0.4 }, // CBD Base
+    { lng: 120.1468, lat: 30.2476, basePrice: 85000, decay: 0.3 }, // West Lake Base
   ];
 
   let idCounter = 0;
@@ -114,28 +143,35 @@ const generateCityWideData = () => {
   for (let lat = latStart; lat <= latEnd; lat += step) {
     for (let lng = lngStart; lng <= lngEnd; lng += step) {
       
-      // Add random jitter to position so it looks organic
-      const jitterLat = lat + (Math.random() - 0.5) * 0.003;
-      const jitterLng = lng + (Math.random() - 0.5) * 0.003;
+      const jitterLat = lat + (Math.random() - 0.5) * 0.002;
+      const jitterLng = lng + (Math.random() - 0.5) * 0.002;
 
-      // Calculate Price based on Gravity Model (Inverse Distance)
-      let maxInfluencedPrice = 30000; // Minimum baseline price
-
+      // 1. Calculate Base Macro Value (Distance to CBD/City Center)
+      let macroPrice = 25000; // Minimum city price
       centers.forEach(center => {
         const dist = getDistance(jitterLng, jitterLat, center.lng, center.lat);
-        // Exponential decay function
-        const priceInfluence = center.basePrice * Math.exp(-center.decay * dist);
-        if (priceInfluence > maxInfluencedPrice) {
-          maxInfluencedPrice = priceInfluence;
+        const influence = center.basePrice * Math.exp(-center.decay * dist);
+        if (influence > macroPrice) macroPrice = influence;
+      });
+
+      // 2. Calculate Facility Bonus (SimCity Logic)
+      let facilityBonus = 0;
+      FACILITIES.forEach(fac => {
+        const dist = getDistance(jitterLng, jitterLat, fac.lng, fac.lat);
+        if (dist < fac.radius) {
+          // Linear falloff from center of facility
+          const factor = 1 - (dist / fac.radius); 
+          facilityBonus += fac.boost * factor;
         }
       });
 
-      // Add noise (+/- 15%)
-      const finalPrice = Math.floor(maxInfluencedPrice * (0.85 + Math.random() * 0.3));
+      // 3. Combine & Add Noise
+      const rawPrice = macroPrice + facilityBonus;
+      // Add randomness (+/- 10%)
+      const finalPrice = Math.floor(rawPrice * (0.9 + Math.random() * 0.2));
 
-      // Skip if likely water/mountain (simple bounds check for West Lake center mostly)
-      const distToWestLakeCenter = getDistance(jitterLng, jitterLat, 120.14, 30.24);
-      if (distToWestLakeCenter < 2.0 && finalPrice < 100000) continue; // Skip likely lake points unless very high value (islands)
+      // Skip invalid geographical areas (simple check for huge water bodies/mountains based on price drop-off)
+      if (finalPrice < 28000) continue; 
 
       features.push({
         type: 'Feature',
@@ -143,8 +179,8 @@ const generateCityWideData = () => {
         properties: {
           price: finalPrice,
           formattedPrice: `¥${(finalPrice / 10000).toFixed(1)}万`,
-          // Weight property for heatmap intensity (0 to 1 normalized approx)
-          heatmapWeight: Math.min(finalPrice, 150000) / 150000
+          // Normalize for heatmap
+          heatmapWeight: Math.min(finalPrice, 160000) / 160000 
         },
         geometry: {
           type: 'Point',

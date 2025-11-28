@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MAPBOX_TOKEN, DEFAULT_VIEW_STATE, HANGZHOU_BOUNDS, COMMUNITY_DATA } from '../constants';
+import { MAPBOX_TOKEN, DEFAULT_VIEW_STATE, HANGZHOU_BOUNDS, COMMUNITY_DATA, FACILITIES_GEOJSON } from '../constants';
 import { MapStyle, Landmark, ViewState } from '../types';
 
 // Access the global mapboxgl object injected by the script tag
@@ -102,7 +102,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
           setMapLoaded(true);
           setInitializing(false);
           
-          addPriceSource(map);
+          addSources(map);
           setup3DBuildings(map);
           updateVisualizationLayers(map, showPrices);
           updateFog(map, styleId);
@@ -146,7 +146,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
     const onStyleData = () => {
         if (!mapRef.current) return;
         if (map.isStyleLoaded()) {
-           addPriceSource(map);
+           addSources(map);
            setup3DBuildings(map);
            updateVisualizationLayers(map, showPrices);
            updateFog(map, styleId);
@@ -186,9 +186,12 @@ const MapContainer: React.FC<MapContainerProps> = ({
       }
   };
 
-  const addPriceSource = (map: any) => {
+  const addSources = (map: any) => {
     if (!map.getSource('communities')) {
        map.addSource('communities', { type: 'geojson', data: COMMUNITY_DATA });
+    }
+    if (!map.getSource('facilities')) {
+       map.addSource('facilities', { type: 'geojson', data: FACILITIES_GEOJSON });
     }
 
     // 1. Heatmap Layer (Ground glow)
@@ -199,22 +202,12 @@ const MapContainer: React.FC<MapContainerProps> = ({
         source: 'communities',
         maxzoom: 15,
         paint: {
-          // Increase the heatmap weight based on frequency and property magnitude
-          'heatmap-weight': [
-            'interpolate', ['linear'], ['get', 'price'],
-            30000, 0,
-            150000, 1
-          ],
-          // Increase the heatmap color weight weight by zoom level
-          // heatmap-intensity is a multiplier on top of heatmap-weight
+          'heatmap-weight': ['get', 'heatmapWeight'],
           'heatmap-intensity': [
             'interpolate', ['linear'], ['zoom'],
             11, 1,
             15, 3
           ],
-          // Color ramp for heatmap.  Domain is 0 (low) to 1 (high).
-          // Begin color ramp at 0-stop with a 0-transparency color
-          // to create a blur-like effect.
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
             0, 'rgba(33,102,172,0)',
@@ -224,23 +217,21 @@ const MapContainer: React.FC<MapContainerProps> = ({
             0.8, 'rgb(239,138,98)',
             1, 'rgb(178,24,43)'
           ],
-          // Adjust the heatmap radius by zoom level
           'heatmap-radius': [
             'interpolate', ['linear'], ['zoom'],
-            11, 25,
-            15, 60
+            11, 20,
+            15, 50
           ],
-          // Transition from heatmap to circle layer by zoom level
           'heatmap-opacity': [
             'interpolate', ['linear'], ['zoom'],
             13, 0.6,
-            15, 0
+            15.5, 0.2
           ],
         }
-      }, 'waterway-label'); // Insert below labels
+      }, 'waterway-label');
     }
     
-    // 2. Text Labels
+    // 2. Text Labels for Price
     if (!map.getLayer('community-labels')) {
       map.addLayer({
         'id': 'community-labels',
@@ -255,9 +246,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
           'text-radial-offset': 0.5,
           'text-justify': 'auto',
           'visibility': 'visible',
-          // Allow some overlap to show density, but not total chaos
           'text-allow-overlap': false, 
-          'text-ignore-placement': false
         },
         'paint': {
           'text-color': '#ffffff',
@@ -268,6 +257,34 @@ const MapContainer: React.FC<MapContainerProps> = ({
             13, 0,
             13.5, 1
           ]
+        }
+      });
+    }
+
+    // 3. Facility Icons (SimCity style markers)
+    if (!map.getLayer('facility-markers')) {
+      map.addLayer({
+        'id': 'facility-markers',
+        'type': 'symbol',
+        'source': 'facilities',
+        'minzoom': 11,
+        'layout': {
+          'text-field': ['format', 
+            ['get', 'icon'], { 'font-scale': 1.5 },
+            '\n', {},
+            ['get', 'name'], { 'font-scale': 0.8 }
+          ],
+          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+          'text-variable-anchor': ['top', 'bottom'],
+          'text-radial-offset': 0.8,
+          'text-justify': 'auto',
+          'visibility': 'visible',
+          'text-allow-overlap': true, // Always show these critical landmarks
+        },
+        'paint': {
+          'text-color': '#fbbf24', // Amber-400
+          'text-halo-color': '#000000',
+          'text-halo-width': 2,
         }
       });
     }
@@ -307,28 +324,25 @@ const MapContainer: React.FC<MapContainerProps> = ({
     if (!map.getLayer('3d-buildings')) return;
 
     if (showPrices) {
-      // PRICE MODE: 
-      // 1. Color buildings based on height (Proxy for value)
-      // 2. Exaggerate height for analysis effect
+      // PRICE MODE (SimCity Analysis View)
       map.setPaintProperty('3d-buildings', 'fill-extrusion-color', [
         'interpolate', ['linear'], ['get', 'height'],
-        0, '#064e3b',      // 0m: Deep Green
-        15, '#10b981',     // 15m: Green (Low rise)
-        40, '#f59e0b',     // 40m: Orange (Mid rise)
-        100, '#ef4444',    // 100m: Red (High rise)
-        250, '#7f1d1d'     // 250m+: Deep Red (Skyscraper)
+        0, '#064e3b',      // Low value/height
+        20, '#10b981',     
+        50, '#f59e0b',     // Mid
+        120, '#ef4444',    // High
+        300, '#7f1d1d'     // Very High
       ]);
 
-      // Slight height exaggeration to accentuate the "Bar Chart" feel
       map.setPaintProperty('3d-buildings', 'fill-extrusion-height', [
         '*', ['get', 'height'], 1.2
       ]);
-      
       map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', 0.9);
 
       // Show overlay layers
       if (map.getLayer('community-labels')) map.setLayoutProperty('community-labels', 'visibility', 'visible');
       if (map.getLayer('price-heatmap')) map.setLayoutProperty('price-heatmap', 'visibility', 'visible');
+      if (map.getLayer('facility-markers')) map.setLayoutProperty('facility-markers', 'visibility', 'visible');
 
     } else {
       // NORMAL MODE
@@ -345,12 +359,12 @@ const MapContainer: React.FC<MapContainerProps> = ({
          13, 0,
          13.05, ['get', 'height']
       ]);
-
       map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', 0.6);
 
       // Hide overlay layers
       if (map.getLayer('community-labels')) map.setLayoutProperty('community-labels', 'visibility', 'none');
       if (map.getLayer('price-heatmap')) map.setLayoutProperty('price-heatmap', 'visibility', 'none');
+      if (map.getLayer('facility-markers')) map.setLayoutProperty('facility-markers', 'visibility', 'none');
     }
   };
 
