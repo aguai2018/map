@@ -17,7 +17,7 @@ export const HANGZHOU_BOUNDS: [[number, number], [number, number]] = [
 export const DEFAULT_VIEW_STATE = {
   lng: 120.2109,
   lat: 30.2442,
-  zoom: 14.5,
+  zoom: 13.5,
   pitch: 60,
   bearing: -20
 };
@@ -58,6 +58,15 @@ export const LANDMARKS: Landmark[] = [
     bearing: 0,
     pitch: 45,
     zoom: 14.5
+  },
+  {
+    id: 'xixi',
+    name: '西溪湿地 (Xixi Wetland)',
+    description: 'Urban wetland park and ecological preserve.',
+    coordinates: { lng: 120.0636, lat: 30.2608 },
+    bearing: 0,
+    pitch: 40,
+    zoom: 13.5
   }
 ];
 
@@ -68,50 +77,87 @@ export const MAP_STYLES = [
   { id: MapStyle.STREETS, name: 'Streets', icon: '🛣️' },
 ];
 
-// Helper to generate a Point feature for a community
-const createCommunityPoint = (lng: number, lat: number, name: string, price: number) => {
-  return {
-    type: 'Feature',
-    properties: {
-      name,
-      price,
-      formattedPrice: `¥${(price / 10000).toFixed(1)}万`, // Short format for labels
-      fullPrice: `¥${(price / 10000).toFixed(1)}万/㎡`
-    },
-    geometry: {
-      type: 'Point',
-      coordinates: [lng, lat]
+// Helper to calculate distance between two points (Haversine approx for simple weighting)
+const getDistance = (lng1: number, lat1: number, lng2: number, lat2: number) => {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng/2) * Math.sin(dLng/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+};
+
+// Procedurally generate City-Wide Data
+const generateCityWideData = () => {
+  const features = [];
+  
+  // Grid settings
+  const latStart = 30.12;
+  const latEnd = 30.40;
+  const lngStart = 119.95;
+  const lngEnd = 120.35;
+  const step = 0.006; // Density of grid (~600m spacing)
+
+  // Economic Centers (Hotspots)
+  const centers = [
+    { lng: 120.2109, lat: 30.2442, basePrice: 120000, decay: 0.3 }, // CBD
+    { lng: 120.1468, lat: 30.2476, basePrice: 110000, decay: 0.25 }, // West Lake
+    { lng: 120.2155, lat: 30.1834, basePrice: 85000, decay: 0.35 },  // Binjiang
+    { lng: 120.0636, lat: 30.2608, basePrice: 70000, decay: 0.4 },   // Xixi/Future Sci-Tech
+    { lng: 120.2900, lat: 30.3000, basePrice: 45000, decay: 0.5 },   // Xiasha (Univ City)
+  ];
+
+  let idCounter = 0;
+
+  for (let lat = latStart; lat <= latEnd; lat += step) {
+    for (let lng = lngStart; lng <= lngEnd; lng += step) {
+      
+      // Add random jitter to position so it looks organic
+      const jitterLat = lat + (Math.random() - 0.5) * 0.003;
+      const jitterLng = lng + (Math.random() - 0.5) * 0.003;
+
+      // Calculate Price based on Gravity Model (Inverse Distance)
+      let maxInfluencedPrice = 30000; // Minimum baseline price
+
+      centers.forEach(center => {
+        const dist = getDistance(jitterLng, jitterLat, center.lng, center.lat);
+        // Exponential decay function
+        const priceInfluence = center.basePrice * Math.exp(-center.decay * dist);
+        if (priceInfluence > maxInfluencedPrice) {
+          maxInfluencedPrice = priceInfluence;
+        }
+      });
+
+      // Add noise (+/- 15%)
+      const finalPrice = Math.floor(maxInfluencedPrice * (0.85 + Math.random() * 0.3));
+
+      // Skip if likely water/mountain (simple bounds check for West Lake center mostly)
+      const distToWestLakeCenter = getDistance(jitterLng, jitterLat, 120.14, 30.24);
+      if (distToWestLakeCenter < 2.0 && finalPrice < 100000) continue; // Skip likely lake points unless very high value (islands)
+
+      features.push({
+        type: 'Feature',
+        id: idCounter++,
+        properties: {
+          price: finalPrice,
+          formattedPrice: `¥${(finalPrice / 10000).toFixed(1)}万`,
+          // Weight property for heatmap intensity (0 to 1 normalized approx)
+          heatmapWeight: Math.min(finalPrice, 150000) / 150000
+        },
+        geometry: {
+          type: 'Point',
+          coordinates: [jitterLng, jitterLat]
+        }
+      });
     }
+  }
+
+  return {
+    type: 'FeatureCollection',
+    features
   };
 };
 
-// Generate Mock Data for Residential Communities around CBD
-const communities = [
-  // Luxury / CBD Core
-  { name: "Yuefu (The MixC)", price: 120000, lng: 120.2120, lat: 30.2530 },
-  { name: "River Metropolis", price: 105000, lng: 120.2080, lat: 30.2510 },
-  { name: "Sunshine Coast", price: 135000, lng: 120.2180, lat: 30.2380 },
-  { name: "Golden Landmark", price: 95000, lng: 120.2050, lat: 30.2480 },
-  
-  // High End / Nearby
-  { name: "Green Garden", price: 85000, lng: 120.2010, lat: 30.2550 },
-  { name: "Oriental Mansion", price: 78000, lng: 120.2220, lat: 30.2580 },
-  { name: "Blue Horizon", price: 82000, lng: 120.1980, lat: 30.2450 },
-  { name: "Crystal City", price: 88000, lng: 120.2250, lat: 30.2420 },
-
-  // Mid Range / Further out
-  { name: "City Plaza A", price: 65000, lng: 120.1900, lat: 30.2600 },
-  { name: "City Plaza B", price: 62000, lng: 120.1920, lat: 30.2620 },
-  { name: "Harmony Heights", price: 58000, lng: 120.2300, lat: 30.2650 },
-  { name: "Future Park", price: 55000, lng: 120.2350, lat: 30.2300 },
-  
-  // Older / More Affordable
-  { name: "Old Town North", price: 42000, lng: 120.1850, lat: 30.2700 },
-  { name: "Canal View", price: 45000, lng: 120.1950, lat: 30.2750 },
-  { name: "East District", price: 38000, lng: 120.2400, lat: 30.2700 },
-];
-
-export const COMMUNITY_DATA = {
-  type: 'FeatureCollection',
-  features: communities.map(c => createCommunityPoint(c.lng, c.lat, c.name, c.price))
-};
+export const COMMUNITY_DATA = generateCityWideData();

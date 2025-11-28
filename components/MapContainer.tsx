@@ -104,7 +104,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
           
           addPriceSource(map);
           setup3DBuildings(map);
-          updateBuildingStyle(map, showPrices);
+          updateVisualizationLayers(map, showPrices);
           updateFog(map, styleId);
         });
 
@@ -146,10 +146,9 @@ const MapContainer: React.FC<MapContainerProps> = ({
     const onStyleData = () => {
         if (!mapRef.current) return;
         if (map.isStyleLoaded()) {
-           // Re-apply layers and sources after style switch
            addPriceSource(map);
            setup3DBuildings(map);
-           updateBuildingStyle(map, showPrices);
+           updateVisualizationLayers(map, showPrices);
            updateFog(map, styleId);
         }
     };
@@ -176,12 +175,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
     if (!mapRef.current || !mapLoaded) return;
     const map = mapRef.current;
     
-    updateBuildingStyle(map, showPrices);
-    
-    // Toggle labels
-    if (map.getLayer('community-labels')) {
-      map.setLayoutProperty('community-labels', 'visibility', showPrices ? 'visible' : 'none');
-    }
+    updateVisualizationLayers(map, showPrices);
   }, [showPrices, mapLoaded]);
 
   const updateFog = (map: any, style: MapStyle) => {
@@ -196,25 +190,84 @@ const MapContainer: React.FC<MapContainerProps> = ({
     if (!map.getSource('communities')) {
        map.addSource('communities', { type: 'geojson', data: COMMUNITY_DATA });
     }
+
+    // 1. Heatmap Layer (Ground glow)
+    if (!map.getLayer('price-heatmap')) {
+      map.addLayer({
+        id: 'price-heatmap',
+        type: 'heatmap',
+        source: 'communities',
+        maxzoom: 15,
+        paint: {
+          // Increase the heatmap weight based on frequency and property magnitude
+          'heatmap-weight': [
+            'interpolate', ['linear'], ['get', 'price'],
+            30000, 0,
+            150000, 1
+          ],
+          // Increase the heatmap color weight weight by zoom level
+          // heatmap-intensity is a multiplier on top of heatmap-weight
+          'heatmap-intensity': [
+            'interpolate', ['linear'], ['zoom'],
+            11, 1,
+            15, 3
+          ],
+          // Color ramp for heatmap.  Domain is 0 (low) to 1 (high).
+          // Begin color ramp at 0-stop with a 0-transparency color
+          // to create a blur-like effect.
+          'heatmap-color': [
+            'interpolate', ['linear'], ['heatmap-density'],
+            0, 'rgba(33,102,172,0)',
+            0.2, 'rgb(103,169,207)',
+            0.4, 'rgb(209,229,240)',
+            0.6, 'rgb(253,219,199)',
+            0.8, 'rgb(239,138,98)',
+            1, 'rgb(178,24,43)'
+          ],
+          // Adjust the heatmap radius by zoom level
+          'heatmap-radius': [
+            'interpolate', ['linear'], ['zoom'],
+            11, 25,
+            15, 60
+          ],
+          // Transition from heatmap to circle layer by zoom level
+          'heatmap-opacity': [
+            'interpolate', ['linear'], ['zoom'],
+            13, 0.6,
+            15, 0
+          ],
+        }
+      }, 'waterway-label'); // Insert below labels
+    }
     
-    // Add text labels for prices
+    // 2. Text Labels
     if (!map.getLayer('community-labels')) {
       map.addLayer({
         'id': 'community-labels',
         'type': 'symbol',
         'source': 'communities',
+        'minzoom': 13,
         'layout': {
           'text-field': ['get', 'formattedPrice'],
           'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-          'text-size': 12,
-          'text-offset': [0, -1.5],
-          'text-anchor': 'bottom',
-          'visibility': 'visible'
+          'text-size': 11,
+          'text-variable-anchor': ['top', 'bottom', 'left', 'right'],
+          'text-radial-offset': 0.5,
+          'text-justify': 'auto',
+          'visibility': 'visible',
+          // Allow some overlap to show density, but not total chaos
+          'text-allow-overlap': false, 
+          'text-ignore-placement': false
         },
         'paint': {
           'text-color': '#ffffff',
           'text-halo-color': '#000000',
-          'text-halo-width': 2
+          'text-halo-width': 2,
+          'text-opacity': [
+            'interpolate', ['linear'], ['zoom'],
+            13, 0,
+            13.5, 1
+          ]
         }
       });
     }
@@ -224,7 +277,6 @@ const MapContainer: React.FC<MapContainerProps> = ({
     const style = map.getStyle();
     if (!style || !style.layers) return; 
 
-    // Find where to insert the layer
     let labelLayerId;
     for (const layer of style.layers) {
         if (layer.type === 'symbol' && layer.layout?.['text-field']) {
@@ -233,7 +285,6 @@ const MapContainer: React.FC<MapContainerProps> = ({
         }
     }
 
-    // Ensure the 3d-buildings layer exists
     if (!map.getLayer('3d-buildings')) {
         map.addLayer(
             {
@@ -242,7 +293,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
                 'source-layer': 'building',
                 'filter': ['==', 'extrude', 'true'],
                 'type': 'fill-extrusion',
-                'minzoom': 13,
+                'minzoom': 12,
                 'paint': {
                     'fill-extrusion-opacity': 0.8
                 }
@@ -252,30 +303,35 @@ const MapContainer: React.FC<MapContainerProps> = ({
     }
   };
 
-  const updateBuildingStyle = (map: any, showPrices: boolean) => {
+  const updateVisualizationLayers = (map: any, showPrices: boolean) => {
     if (!map.getLayer('3d-buildings')) return;
 
     if (showPrices) {
       // PRICE MODE: 
-      // 1. Color buildings based on their height (Proxy for value/price)
-      // 2. Exaggerate height slightly to make the "Bar Chart" effect clearer
+      // 1. Color buildings based on height (Proxy for value)
+      // 2. Exaggerate height for analysis effect
       map.setPaintProperty('3d-buildings', 'fill-extrusion-color', [
         'interpolate', ['linear'], ['get', 'height'],
-        0, '#374151',      // Low/Podium -> Dark Gray
-        30, '#10b981',     // 30m -> Green (Affordable)
-        80, '#eab308',     // 80m -> Yellow (Mid-range)
-        200, '#ef4444',    // 200m -> Red (High Value)
-        400, '#7f1d1d'     // 400m -> Deep Red (Luxury/Landmark)
+        0, '#064e3b',      // 0m: Deep Green
+        15, '#10b981',     // 15m: Green (Low rise)
+        40, '#f59e0b',     // 40m: Orange (Mid rise)
+        100, '#ef4444',    // 100m: Red (High rise)
+        250, '#7f1d1d'     // 250m+: Deep Red (Skyscraper)
       ]);
 
+      // Slight height exaggeration to accentuate the "Bar Chart" feel
       map.setPaintProperty('3d-buildings', 'fill-extrusion-height', [
-        '*', ['get', 'height'], 1.2 // 20% height boost for dramatic effect
+        '*', ['get', 'height'], 1.2
       ]);
       
       map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', 0.9);
 
+      // Show overlay layers
+      if (map.getLayer('community-labels')) map.setLayoutProperty('community-labels', 'visibility', 'visible');
+      if (map.getLayer('price-heatmap')) map.setLayoutProperty('price-heatmap', 'visibility', 'visible');
+
     } else {
-      // NORMAL MODE: Standard visual style
+      // NORMAL MODE
       map.setPaintProperty('3d-buildings', 'fill-extrusion-color', [
         'interpolate', ['linear'], ['get', 'height'],
         0, '#2a2a2a',
@@ -291,6 +347,10 @@ const MapContainer: React.FC<MapContainerProps> = ({
       ]);
 
       map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', 0.6);
+
+      // Hide overlay layers
+      if (map.getLayer('community-labels')) map.setLayoutProperty('community-labels', 'visibility', 'none');
+      if (map.getLayer('price-heatmap')) map.setLayoutProperty('price-heatmap', 'visibility', 'none');
     }
   };
 
