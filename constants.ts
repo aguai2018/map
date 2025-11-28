@@ -78,22 +78,48 @@ export const MAP_STYLES = [
 ];
 
 // --- SimCity Logic: Facilities & Amenities ---
-// These facilities boost local land value
 export const FACILITIES = [
   // Hospitals 🏥
-  { name: "浙一医院 (First Affiliated)", type: "Hospital", icon: "🏥", boost: 15000, radius: 2.0, lng: 120.18, lat: 30.25 },
-  { name: "邵逸夫医院 (Sir Run Run Shaw)", type: "Hospital", icon: "🏥", boost: 18000, radius: 2.5, lng: 120.205, lat: 30.26 },
+  { name: "浙一医院 (First Affiliated)", type: "Hospital", icon: "🏥", boost: 15000, radius: 2.0, lng: 120.18, lat: 30.25, color: '#3b82f6' }, // Blue
+  { name: "邵逸夫医院 (Sir Run Run Shaw)", type: "Hospital", icon: "🏥", boost: 18000, radius: 2.5, lng: 120.205, lat: 30.26, color: '#3b82f6' },
   
   // Schools 🎓 (Education districts are expensive!)
-  { name: "浙江大学 (ZJU Yuquan)", type: "School", icon: "🎓", boost: 25000, radius: 1.5, lng: 120.125, lat: 30.263 },
-  { name: "杭州高级中学 (Hangzhou High)", type: "School", icon: "🎓", boost: 30000, radius: 1.2, lng: 120.17, lat: 30.255 },
-  { name: "学军中学 (Xuejun High)", type: "School", icon: "🎓", boost: 28000, radius: 1.2, lng: 120.135, lat: 30.275 },
+  { name: "浙江大学 (ZJU Yuquan)", type: "School", icon: "🎓", boost: 25000, radius: 1.5, lng: 120.125, lat: 30.263, color: '#10b981' }, // Green
+  { name: "杭州高级中学 (Hangzhou High)", type: "School", icon: "🎓", boost: 30000, radius: 1.2, lng: 120.17, lat: 30.255, color: '#10b981' },
+  { name: "学军中学 (Xuejun High)", type: "School", icon: "🎓", boost: 28000, radius: 1.2, lng: 120.135, lat: 30.275, color: '#10b981' },
   
   // Government ⚖️
-  { name: "市民中心 (Citizen Center)", type: "Gov", icon: "⚖️", boost: 12000, radius: 3.0, lng: 120.212, lat: 30.245 },
-  { name: "省政府 (Provincial Gov)", type: "Gov", icon: "⚖️", boost: 10000, radius: 2.0, lng: 120.155, lat: 30.265 },
+  { name: "市民中心 (Citizen Center)", type: "Gov", icon: "⚖️", boost: 12000, radius: 3.0, lng: 120.212, lat: 30.245, color: '#f59e0b' }, // Orange
+  { name: "省政府 (Provincial Gov)", type: "Gov", icon: "⚖️", boost: 10000, radius: 2.0, lng: 120.155, lat: 30.265, color: '#f59e0b' },
 ];
 
+// Helper to generate a circle polygon (approximate)
+const createGeoJSONCircle = (center: [number, number], radiusInKm: number, points = 64) => {
+  const coords = {
+    latitude: center[1],
+    longitude: center[0]
+  };
+
+  const km = radiusInKm;
+
+  const ret = [];
+  const distanceX = km / (111.32 * Math.cos(coords.latitude * Math.PI / 180));
+  const distanceY = km / 110.574;
+
+  let theta, x, y;
+  for (let i = 0; i < points; i++) {
+    theta = (i / points) * (2 * Math.PI);
+    x = distanceX * Math.cos(theta);
+    y = distanceY * Math.sin(theta);
+
+    ret.push([coords.longitude + x, coords.latitude + y]);
+  }
+  ret.push(ret[0]); // Close loop
+
+  return ret;
+};
+
+// Generate Facility Points
 export const FACILITIES_GEOJSON = {
   type: 'FeatureCollection',
   features: FACILITIES.map((f, i) => ({
@@ -103,9 +129,30 @@ export const FACILITIES_GEOJSON = {
       name: f.name,
       type: f.type,
       icon: f.icon,
+      color: f.color,
+      boost: f.boost,
+      radius: f.radius,
       description: `Impact: +¥${f.boost} within ${f.radius}km`
     },
     geometry: { type: 'Point', coordinates: [f.lng, f.lat] }
+  }))
+};
+
+// Generate Influence Zones (Circles)
+export const INFLUENCE_ZONES_GEOJSON = {
+  type: 'FeatureCollection',
+  features: FACILITIES.map((f, i) => ({
+    type: 'Feature',
+    id: `zone-${i}`,
+    properties: {
+      type: f.type,
+      color: f.color,
+      boost: f.boost
+    },
+    geometry: { 
+      type: 'Polygon', 
+      coordinates: [createGeoJSONCircle([f.lng, f.lat], f.radius)] 
+    }
   }))
 };
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MAPBOX_TOKEN, DEFAULT_VIEW_STATE, HANGZHOU_BOUNDS, COMMUNITY_DATA, FACILITIES_GEOJSON } from '../constants';
+import { MAPBOX_TOKEN, DEFAULT_VIEW_STATE, HANGZHOU_BOUNDS, COMMUNITY_DATA, FACILITIES_GEOJSON, INFLUENCE_ZONES_GEOJSON } from '../constants';
 import { MapStyle, Landmark, ViewState } from '../types';
 
 // Access the global mapboxgl object injected by the script tag
@@ -193,6 +193,9 @@ const MapContainer: React.FC<MapContainerProps> = ({
     if (!map.getSource('facilities')) {
        map.addSource('facilities', { type: 'geojson', data: FACILITIES_GEOJSON });
     }
+    if (!map.getSource('influence-zones')) {
+       map.addSource('influence-zones', { type: 'geojson', data: INFLUENCE_ZONES_GEOJSON });
+    }
 
     // 1. Heatmap Layer (Ground glow)
     if (!map.getLayer('price-heatmap')) {
@@ -231,7 +234,35 @@ const MapContainer: React.FC<MapContainerProps> = ({
       }, 'waterway-label');
     }
     
-    // 2. Text Labels for Price
+    // 2. Influence Zones (SimCity style Green Circles)
+    if (!map.getLayer('influence-fill')) {
+      map.addLayer({
+        'id': 'influence-fill',
+        'type': 'fill',
+        'source': 'influence-zones',
+        'layout': { 'visibility': 'none' },
+        'paint': {
+          'fill-color': ['get', 'color'],
+          'fill-opacity': 0.15
+        }
+      });
+    }
+    if (!map.getLayer('influence-outline')) {
+      map.addLayer({
+        'id': 'influence-outline',
+        'type': 'line',
+        'source': 'influence-zones',
+        'layout': { 'visibility': 'none' },
+        'paint': {
+          'line-color': ['get', 'color'],
+          'line-width': 2,
+          'line-opacity': 0.6,
+          'line-dasharray': [2, 2] // Dashed line for technical look
+        }
+      });
+    }
+
+    // 3. Text Labels for Price
     if (!map.getLayer('community-labels')) {
       map.addLayer({
         'id': 'community-labels',
@@ -261,7 +292,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
       });
     }
 
-    // 3. Facility Icons (SimCity style markers)
+    // 4. Facility Icons (SimCity style markers)
     if (!map.getLayer('facility-markers')) {
       map.addLayer({
         'id': 'facility-markers',
@@ -279,10 +310,10 @@ const MapContainer: React.FC<MapContainerProps> = ({
           'text-radial-offset': 0.8,
           'text-justify': 'auto',
           'visibility': 'visible',
-          'text-allow-overlap': true, // Always show these critical landmarks
+          'text-allow-overlap': true,
         },
         'paint': {
-          'text-color': '#fbbf24', // Amber-400
+          'text-color': ['get', 'color'],
           'text-halo-color': '#000000',
           'text-halo-width': 2,
         }
@@ -325,13 +356,15 @@ const MapContainer: React.FC<MapContainerProps> = ({
 
     if (showPrices) {
       // PRICE MODE (SimCity Analysis View)
+      
+      // 1. Color buildings by "Value/Height" (SimCity uses white/grey blocks for low, colors for high)
       map.setPaintProperty('3d-buildings', 'fill-extrusion-color', [
         'interpolate', ['linear'], ['get', 'height'],
-        0, '#064e3b',      // Low value/height
-        20, '#10b981',     
-        50, '#f59e0b',     // Mid
-        120, '#ef4444',    // High
-        300, '#7f1d1d'     // Very High
+        0, '#374151',      // Dark Grey (Low)
+        30, '#10b981',     // Green (Mid-Low)
+        80, '#3b82f6',     // Blue (Mid-High)
+        150, '#f59e0b',    // Orange (High)
+        300, '#ef4444'     // Red (Extreme)
       ]);
 
       map.setPaintProperty('3d-buildings', 'fill-extrusion-height', [
@@ -339,10 +372,11 @@ const MapContainer: React.FC<MapContainerProps> = ({
       ]);
       map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', 0.9);
 
-      // Show overlay layers
-      if (map.getLayer('community-labels')) map.setLayoutProperty('community-labels', 'visibility', 'visible');
-      if (map.getLayer('price-heatmap')) map.setLayoutProperty('price-heatmap', 'visibility', 'visible');
-      if (map.getLayer('facility-markers')) map.setLayoutProperty('facility-markers', 'visibility', 'visible');
+      // 2. Show Overlay Layers
+      const layersToShow = ['community-labels', 'price-heatmap', 'facility-markers', 'influence-fill', 'influence-outline'];
+      layersToShow.forEach(id => {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'visible');
+      });
 
     } else {
       // NORMAL MODE
@@ -361,10 +395,11 @@ const MapContainer: React.FC<MapContainerProps> = ({
       ]);
       map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', 0.6);
 
-      // Hide overlay layers
-      if (map.getLayer('community-labels')) map.setLayoutProperty('community-labels', 'visibility', 'none');
-      if (map.getLayer('price-heatmap')) map.setLayoutProperty('price-heatmap', 'visibility', 'none');
-      if (map.getLayer('facility-markers')) map.setLayoutProperty('facility-markers', 'visibility', 'none');
+      // Hide Overlay Layers
+      const layersToHide = ['community-labels', 'price-heatmap', 'facility-markers', 'influence-fill', 'influence-outline'];
+      layersToHide.forEach(id => {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none');
+      });
     }
   };
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Landmark, MapStyle, ViewState } from '../types';
 import { LANDMARKS, MAP_STYLES } from '../constants';
-import { Navigation, Layers, Map as MapIcon, Info, Building2, BarChart3 } from 'lucide-react';
+import { Navigation, Layers, Map as MapIcon, Info, Building2, BarChart3, GraduationCap, Hospital, Scale } from 'lucide-react';
 
 interface ControlPanelProps {
   currentStyle: MapStyle;
@@ -41,47 +41,74 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
       </div>
 
-      {/* Data Visualization Control */}
-      <div className="bg-black/80 backdrop-blur-md p-4 rounded-2xl shadow-xl border border-white/10 pointer-events-auto">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 uppercase tracking-wider">
-          <BarChart3 className="w-4 h-4 text-orange-400" />
-          Visualization
-        </h2>
+      {/* SimCity Land Value Tool */}
+      <div className="bg-black/90 backdrop-blur-lg p-1 rounded-2xl shadow-xl border border-blue-500/30 pointer-events-auto overflow-hidden">
+        <div className="p-4 border-b border-white/10 bg-gradient-to-r from-blue-900/20 to-transparent">
+          <h2 className="text-sm font-bold text-blue-100 mb-0 flex items-center gap-2 uppercase tracking-widest">
+            <BarChart3 className="w-4 h-4 text-blue-400" />
+            Land Value Analysis
+          </h2>
+        </div>
         
-        <button
-          onClick={() => onTogglePrices(!showPrices)}
-          className={`w-full flex items-center justify-between p-3 rounded-xl transition-all duration-200 border ${
-            showPrices 
-              ? 'bg-orange-900/30 border-orange-500/50 text-orange-200' 
-              : 'bg-white/5 border-transparent text-gray-400 hover:bg-white/10'
-          }`}
-        >
-          <div className="flex items-center gap-3">
-            <Building2 className={`w-5 h-5 ${showPrices ? 'text-orange-400' : 'text-gray-500'}`} />
-            <div className="text-left">
-              <div className="font-medium text-sm">Real Estate Value</div>
-              <div className="text-xs opacity-70">Colors buildings by height/value</div>
+        <div className="p-4">
+          <button
+            onClick={() => onTogglePrices(!showPrices)}
+            className={`w-full flex items-center justify-between p-4 rounded-xl transition-all duration-300 border-2 ${
+              showPrices 
+                ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_20px_rgba(37,99,235,0.5)]' 
+                : 'bg-white/5 border-gray-700 text-gray-400 hover:bg-white/10 hover:border-gray-500'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Building2 className={`w-6 h-6 ${showPrices ? 'text-white' : 'text-gray-500'}`} />
+              <div className="text-left">
+                <div className="font-bold text-base">{showPrices ? 'Analysis Active' : 'Enable Data View'}</div>
+                <div className="text-xs opacity-80">{showPrices ? 'Showing Influence Zones' : 'Click to visualize value'}</div>
+              </div>
             </div>
-          </div>
-          <div className={`w-10 h-6 rounded-full p-1 transition-colors ${showPrices ? 'bg-orange-500' : 'bg-gray-700'}`}>
-            <div className={`bg-white w-4 h-4 rounded-full shadow-md transition-transform ${showPrices ? 'translate-x-4' : ''}`} />
-          </div>
-        </button>
+            <div className={`w-3 h-3 rounded-full ${showPrices ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
+          </button>
 
-        {showPrices && (
-          <div className="mt-3 pt-3 border-t border-white/10">
-            <div className="flex justify-between text-xs text-gray-400 mb-1 font-mono">
-              <span>Low</span>
-              <span>Mid</span>
-              <span>High</span>
-              <span>Lux</span>
+          {showPrices && (
+            <div className="mt-4 space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
+              {/* Value Gradient */}
+              <div>
+                <div className="flex justify-between text-[10px] text-gray-400 mb-1 font-mono uppercase tracking-wider">
+                  <span>Standard</span>
+                  <span>Premium</span>
+                  <span>Elite</span>
+                </div>
+                <div className="h-3 w-full rounded-full bg-gradient-to-r from-gray-700 via-green-500 via-blue-500 via-orange-500 to-red-600 border border-white/10" />
+              </div>
+
+              {/* Influencers Legend */}
+              <div className="bg-white/5 rounded-lg p-3 space-y-2 border border-white/5">
+                <div className="text-xs font-semibold text-gray-300 mb-2 uppercase">Value Boosters</div>
+                
+                <div className="flex items-center gap-3 text-xs text-green-200">
+                  <div className="p-1.5 bg-green-500/20 rounded-md border border-green-500/30">
+                    <GraduationCap className="w-3 h-3 text-green-400" />
+                  </div>
+                  <span>Schools (+Value)</span>
+                </div>
+                
+                <div className="flex items-center gap-3 text-xs text-blue-200">
+                  <div className="p-1.5 bg-blue-500/20 rounded-md border border-blue-500/30">
+                    <Hospital className="w-3 h-3 text-blue-400" />
+                  </div>
+                  <span>Hospitals (+Value)</span>
+                </div>
+
+                <div className="flex items-center gap-3 text-xs text-orange-200">
+                  <div className="p-1.5 bg-orange-500/20 rounded-md border border-orange-500/30">
+                    <Scale className="w-3 h-3 text-orange-400" />
+                  </div>
+                  <span>Government (+Value)</span>
+                </div>
+              </div>
             </div>
-            <div className="h-2 w-full rounded-full bg-gradient-to-r from-gray-700 via-green-500 via-yellow-500 to-red-600" />
-            <p className="text-[10px] text-gray-500 mt-2 italic">
-              *Visualizes building scale as a proxy for property value. Floating labels show specific community data.
-            </p>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Landmarks */}
@@ -130,20 +157,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               {style.name}
             </button>
           ))}
-        </div>
-      </div>
-      
-      {/* Instructions */}
-      <div className="bg-black/80 backdrop-blur-md p-4 rounded-2xl shadow-xl border border-white/10 pointer-events-auto">
-        <div className="flex items-start gap-3">
-          <Info className="w-5 h-5 text-yellow-500 shrink-0 mt-0.5" />
-          <div className="text-xs text-gray-400 leading-relaxed">
-            <strong className="text-gray-200 block mb-1">Navigation Controls:</strong>
-            <ul className="list-disc pl-4 space-y-1">
-              <li>Right Click + Drag to rotate/pitch</li>
-              <li>Ctrl + Scroll to zoom deeply</li>
-            </ul>
-          </div>
         </div>
       </div>
 
