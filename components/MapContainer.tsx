@@ -116,22 +116,26 @@ const MapContainer: React.FC<MapContainerProps> = ({
           setMapLoaded(true);
           setInitializing(false);
           add3DBuildings(map);
-          addPriceLayer(map, showPrices); // Add our custom layer
+          addPriceLayer(map, showPrices);
           updateFog(map, styleId);
         });
 
         // Add interaction for price blocks
         map.on('click', 'community-blocks', (e: any) => {
+          if (!e.features || e.features.length === 0) return;
+          
           const coordinates = e.lngLat;
-          const description = e.features[0].properties.formattedPrice;
-          const name = e.features[0].properties.name;
+          const { formattedPrice, name } = e.features[0].properties;
 
-          new mapboxgl.Popup({ offset: 25, className: 'custom-popup' })
+          new mapboxgl.Popup({ offset: 25, className: 'custom-popup', closeButton: false })
             .setLngLat(coordinates)
             .setHTML(`
-              <div class="p-2 text-gray-800">
-                <h3 class="font-bold text-sm">${name}</h3>
-                <p class="text-xs mt-1">Avg Price: <span class="font-mono text-blue-600 font-bold">${description}</span></p>
+              <div class="px-3 py-2 text-gray-800 bg-white rounded shadow-sm min-w-[140px]">
+                <h3 class="font-bold text-sm mb-1 text-gray-900 border-b pb-1">${name}</h3>
+                <div class="flex items-center justify-between mt-1">
+                  <span class="text-xs text-gray-500">Price:</span>
+                  <span class="font-mono text-blue-600 font-bold text-sm">${formattedPrice}</span>
+                </div>
               </div>
             `)
             .addTo(map);
@@ -236,14 +240,15 @@ const MapContainer: React.FC<MapContainerProps> = ({
     if (!mapRef.current || !mapLoaded) return;
     const map = mapRef.current;
     
+    // We check both layer and source existence
     if (map.getLayer('community-blocks')) {
       map.setLayoutProperty(
         'community-blocks', 
         'visibility', 
         showPrices ? 'visible' : 'none'
       );
-    } else if (showPrices) {
-      // If layer missing but requested (rare case), add it
+    } else if (showPrices && map.getSource('communities')) {
+      // If layer missing but source exists, re-add layer (rare race condition)
       addPriceLayer(map, true);
     }
   }, [showPrices, mapLoaded]);
@@ -268,15 +273,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
 
   const addPriceLayer = (map: any, isVisible: boolean) => {
     try {
-      if (map.getSource('communities')) {
-        if (!map.getLayer('community-blocks')) {
-           // If source exists but layer doesn't (weird state), proceed to add layer
-        } else {
-           // Already exists, just update visibility
-           map.setLayoutProperty('community-blocks', 'visibility', isVisible ? 'visible' : 'none');
-           return;
-        }
-      } else {
+      if (!map.getSource('communities')) {
          map.addSource('communities', {
            type: 'geojson',
            data: COMMUNITY_DATA
@@ -301,14 +298,18 @@ const MapContainer: React.FC<MapContainerProps> = ({
               'interpolate',
               ['linear'],
               ['get', 'price'],
-              30000, '#10b981', // Emerald 500
-              60000, '#eab308', // Yellow 500
-              100000, '#ef4444' // Red 500
+              30000, '#10b981', // Emerald 500 (Cheap)
+              60000, '#eab308', // Yellow 500 (Mid)
+              100000, '#ef4444', // Red 500 (Expensive)
+              140000, '#7f1d1d'  // Dark Red (Luxury)
             ],
             'fill-extrusion-base': 0,
             'fill-extrusion-opacity': 0.9
           }
         });
+      } else {
+        // If layer exists, ensure visibility match
+        map.setLayoutProperty('community-blocks', 'visibility', isVisible ? 'visible' : 'none');
       }
     } catch (e) {
       console.warn("Could not add price layer", e);

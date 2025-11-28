@@ -17,9 +17,9 @@ export const HANGZHOU_BOUNDS: [[number, number], [number, number]] = [
 export const DEFAULT_VIEW_STATE = {
   lng: 120.2109,
   lat: 30.2442,
-  zoom: 15.5,
+  zoom: 14.5,
   pitch: 60,
-  bearing: -17.6
+  bearing: -20
 };
 
 export const LANDMARKS: Landmark[] = [
@@ -68,46 +68,60 @@ export const MAP_STYLES = [
   { id: MapStyle.STREETS, name: 'Streets', icon: '🛣️' },
 ];
 
-// Helper to generate a small square polygon around a point
-const createBlock = (lng: number, lat: number, name: string, price: number) => {
-  const size = 0.0015; // roughly 150m
+// Helper to generate a square polygon (Block) around a point
+const createBlockFeature = (lng: number, lat: number, name: string, price: number) => {
+  // Size of the block in degrees (approx 150m-200m)
+  const size = 0.0015;
+  const half = size / 2;
+
   return {
     type: 'Feature',
     properties: {
       name,
-      price,
-      formattedPrice: `¥${price.toLocaleString()}/㎡`
+      price, // numeric price for height scaling
+      formattedPrice: `¥${(price / 10000).toFixed(1)}万/㎡`, // string for display
+      height: price * 0.005, // pre-calculate height scaling if needed, though we do it in style
     },
     geometry: {
       type: 'Polygon',
       coordinates: [[
-        [lng - size, lat - size],
-        [lng + size, lat - size],
-        [lng + size, lat + size],
-        [lng - size, lat + size],
-        [lng - size, lat - size]
+        [lng - half, lat - half],
+        [lng + half, lat - half],
+        [lng + half, lat + half],
+        [lng - half, lat + half],
+        [lng - half, lat - half]
       ]]
     }
   };
 };
 
+// Generate Mock Data for Residential Communities around CBD
+const communities = [
+  // Luxury / CBD Core
+  { name: "Yuefu (The MixC)", price: 120000, lng: 120.2120, lat: 30.2530 },
+  { name: "River Metropolis", price: 105000, lng: 120.2080, lat: 30.2510 },
+  { name: "Sunshine Coast", price: 135000, lng: 120.2180, lat: 30.2380 },
+  { name: "Golden Landmark", price: 95000, lng: 120.2050, lat: 30.2480 },
+  
+  // High End / Nearby
+  { name: "Green Garden", price: 85000, lng: 120.2010, lat: 30.2550 },
+  { name: "Oriental Mansion", price: 78000, lng: 120.2220, lat: 30.2580 },
+  { name: "Blue Horizon", price: 82000, lng: 120.1980, lat: 30.2450 },
+  { name: "Crystal City", price: 88000, lng: 120.2250, lat: 30.2420 },
+
+  // Mid Range / Further out
+  { name: "City Plaza A", price: 65000, lng: 120.1900, lat: 30.2600 },
+  { name: "City Plaza B", price: 62000, lng: 120.1920, lat: 30.2620 },
+  { name: "Harmony Heights", price: 58000, lng: 120.2300, lat: 30.2650 },
+  { name: "Future Park", price: 55000, lng: 120.2350, lat: 30.2300 },
+  
+  // Older / More Affordable
+  { name: "Old Town North", price: 42000, lng: 120.1850, lat: 30.2700 },
+  { name: "Canal View", price: 45000, lng: 120.1950, lat: 30.2750 },
+  { name: "East District", price: 38000, lng: 120.2400, lat: 30.2700 },
+];
+
 export const COMMUNITY_DATA = {
   type: 'FeatureCollection',
-  features: [
-    createBlock(120.2050, 30.2420, 'Golden Riverside', 85000),
-    createBlock(120.2080, 30.2450, 'CBD Central Park', 110000),
-    createBlock(120.2120, 30.2410, 'Hangzhou Heights', 92000),
-    createBlock(120.2150, 30.2460, 'Sunshine City', 65000),
-    createBlock(120.2020, 30.2480, 'Old Town Residency', 45000),
-    createBlock(120.2180, 30.2430, 'Future Tech Home', 72000),
-    createBlock(120.2090, 30.2390, 'River View Palace', 98000),
-    createBlock(120.2200, 30.2480, 'Eastern Garden', 55000),
-    createBlock(120.2010, 30.2380, 'Civic Center Apt', 88000),
-    createBlock(120.2220, 30.2410, 'Green Plaza', 62000),
-    createBlock(120.2140, 30.2350, 'South Bank Loft', 75000),
-    createBlock(120.1980, 30.2450, 'West End Court', 58000),
-    createBlock(120.2250, 30.2450, 'Metro Complex', 42000),
-    createBlock(120.2060, 30.2500, 'North Star Villas', 68000),
-    createBlock(120.2190, 30.2370, 'Sapphire Tower', 105000),
-  ]
+  features: communities.map(c => createBlockFeature(c.lng, c.lat, c.name, c.price))
 };
