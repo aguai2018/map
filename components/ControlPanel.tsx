@@ -1,13 +1,15 @@
 import React from 'react';
 import { Landmark, MapStyle, ViewState } from '../types';
 import { LANDMARKS, MAP_STYLES } from '../constants';
-import { Navigation, Layers, Compass, Map as MapIcon, Info } from 'lucide-react';
+import { Navigation, Layers, Compass, Map as MapIcon, Info, Building2, BarChart3 } from 'lucide-react';
 
 interface ControlPanelProps {
   currentStyle: MapStyle;
   onStyleChange: (style: MapStyle) => void;
   onLandmarkSelect: (landmark: Landmark) => void;
   viewState: ViewState;
+  showPrices: boolean;
+  onTogglePrices: (show: boolean) => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -15,6 +17,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onStyleChange,
   onLandmarkSelect,
   viewState,
+  showPrices,
+  onTogglePrices
 }) => {
   return (
     <div className="absolute top-4 left-4 z-10 flex flex-col gap-4 max-h-[calc(100vh-2rem)] w-80 pointer-events-none">
@@ -35,6 +39,44 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           <div>PITCH: {viewState.pitch.toFixed(0)}°</div>
           <div>BEARING: {viewState.bearing.toFixed(0)}°</div>
         </div>
+      </div>
+
+      {/* Data Visualization Control */}
+      <div className="bg-black/80 backdrop-blur-md p-4 rounded-2xl shadow-xl border border-white/10 pointer-events-auto">
+        <h2 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 uppercase tracking-wider">
+          <BarChart3 className="w-4 h-4 text-orange-400" />
+          Analytics
+        </h2>
+        
+        <button
+          onClick={() => onTogglePrices(!showPrices)}
+          className={`w-full flex items-center justify-between p-3 rounded-xl transition-all duration-200 border ${
+            showPrices 
+              ? 'bg-orange-900/30 border-orange-500/50 text-orange-200' 
+              : 'bg-white/5 border-transparent text-gray-400 hover:bg-white/10'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <Building2 className={`w-5 h-5 ${showPrices ? 'text-orange-400' : 'text-gray-500'}`} />
+            <div className="text-left">
+              <div className="font-medium text-sm">Property Prices</div>
+              <div className="text-xs opacity-70">Block height = Avg Price</div>
+            </div>
+          </div>
+          <div className={`w-10 h-6 rounded-full p-1 transition-colors ${showPrices ? 'bg-orange-500' : 'bg-gray-700'}`}>
+            <div className={`bg-white w-4 h-4 rounded-full shadow-md transition-transform ${showPrices ? 'translate-x-4' : ''}`} />
+          </div>
+        </button>
+
+        {showPrices && (
+          <div className="mt-3 pt-3 border-t border-white/10">
+            <div className="flex justify-between text-xs text-gray-400 mb-1">
+              <span>¥30k/㎡</span>
+              <span>¥100k+/㎡</span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-gradient-to-r from-green-500 via-yellow-500 to-red-600" />
+          </div>
+        )}
       </div>
 
       {/* Landmarks */}
@@ -95,7 +137,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             <ul className="list-disc pl-4 space-y-1">
               <li>Right Click + Drag to rotate/pitch</li>
               <li>Ctrl + Scroll to zoom deeply</li>
-              <li>Click buildings for details (if avail)</li>
+              <li>Click blocks for price details</li>
             </ul>
           </div>
         </div>

@@ -9,6 +9,7 @@ const App: React.FC = () => {
   const [currentStyle, setCurrentStyle] = useState<MapStyle>(MapStyle.NAVIGATION_NIGHT);
   const [selectedLandmark, setSelectedLandmark] = useState<Landmark | null>(null);
   const [viewState, setViewState] = useState<ViewState>(DEFAULT_VIEW_STATE);
+  const [showPrices, setShowPrices] = useState<boolean>(true);
 
   const handleStyleChange = (style: MapStyle) => {
     setCurrentStyle(style);
@@ -27,6 +28,7 @@ const App: React.FC = () => {
             styleId={currentStyle} 
             selectedLandmark={selectedLandmark}
             onViewStateChange={setViewState}
+            showPrices={showPrices}
           />
         </ErrorBoundary>
       </div>
@@ -37,6 +39,8 @@ const App: React.FC = () => {
         onStyleChange={handleStyleChange}
         onLandmarkSelect={handleLandmarkSelect}
         viewState={viewState}
+        showPrices={showPrices}
+        onTogglePrices={setShowPrices}
       />
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MAPBOX_TOKEN, DEFAULT_VIEW_STATE, HANGZHOU_BOUNDS } from '../constants';
+import { MAPBOX_TOKEN, DEFAULT_VIEW_STATE, HANGZHOU_BOUNDS, COMMUNITY_DATA } from '../constants';
 import { MapStyle, Landmark, ViewState } from '../types';
 
 // Access the global mapboxgl object injected by the script tag
@@ -13,12 +13,14 @@ interface MapContainerProps {
   styleId: MapStyle;
   selectedLandmark: Landmark | null;
   onViewStateChange: (viewState: ViewState) => void;
+  showPrices: boolean;
 }
 
 const MapContainer: React.FC<MapContainerProps> = ({ 
   styleId, 
   selectedLandmark,
-  onViewStateChange 
+  onViewStateChange,
+  showPrices
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -52,7 +54,6 @@ const MapContainer: React.FC<MapContainerProps> = ({
         mapboxgl.prewarm = false;
 
         // WORKAROUND: Create a local worker blob to bypass Cross-Origin restrictions in iframes
-        // Using v2.15.0 worker specifically to match index.html
         if (!mapboxgl.workerUrl) {
            try {
                const workerResponse = await fetch('https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl-csp-worker.js');
@@ -61,13 +62,11 @@ const MapContainer: React.FC<MapContainerProps> = ({
                mapboxgl.workerUrl = window.URL.createObjectURL(blob);
            } catch (e) {
                console.warn("Failed to create local worker blob, using default CDN", e);
-               // Do not fail here, let Mapbox try its default
            }
         }
 
         if (!mounted) return;
 
-        // Wrap map construction to catch synchronous security errors
         let map: any;
         try {
             map = new mapboxgl.Map({
@@ -86,17 +85,13 @@ const MapContainer: React.FC<MapContainerProps> = ({
             });
         } catch (constructError: any) {
              const msg = constructError.message || '';
-             // If we get blocked frame here, it's fatal for the constructor.
-             // WE DO NOT THROW HERE. We set error state to avoid React crash.
              if (msg.includes('Blocked a frame') || msg.includes('Location')) {
-                 console.warn("Caught Map construction security error:", msg);
                  if (mounted) {
                     setError("Mapbox cannot load in this secure preview frame. Please try opening the page directly.");
                     setInitializing(false);
                  }
                  return;
              } else {
-                 // For other errors, we might want to see them
                  console.error("Unknown map construction error:", constructError);
                  if (mounted) {
                     setError("Failed to initialize map engine: " + msg);
@@ -121,19 +116,41 @@ const MapContainer: React.FC<MapContainerProps> = ({
           setMapLoaded(true);
           setInitializing(false);
           add3DBuildings(map);
+          addPriceLayer(map, showPrices); // Add our custom layer
           updateFog(map, styleId);
         });
 
-        // Filter out benign security errors
+        // Add interaction for price blocks
+        map.on('click', 'community-blocks', (e: any) => {
+          const coordinates = e.lngLat;
+          const description = e.features[0].properties.formattedPrice;
+          const name = e.features[0].properties.name;
+
+          new mapboxgl.Popup({ offset: 25, className: 'custom-popup' })
+            .setLngLat(coordinates)
+            .setHTML(`
+              <div class="p-2 text-gray-800">
+                <h3 class="font-bold text-sm">${name}</h3>
+                <p class="text-xs mt-1">Avg Price: <span class="font-mono text-blue-600 font-bold">${description}</span></p>
+              </div>
+            `)
+            .addTo(map);
+        });
+
+        // Change cursor on hover
+        map.on('mouseenter', 'community-blocks', () => {
+          map.getCanvas().style.cursor = 'pointer';
+        });
+        map.on('mouseleave', 'community-blocks', () => {
+          map.getCanvas().style.cursor = '';
+        });
+
         map.on('error', (e: any) => {
           const msg = e.error?.message || '';
           if (msg.includes('Location') || msg.includes('SecurityError') || msg.includes('Blocked a frame')) {
-              console.warn('Suppressing iframe security error in Mapbox Event:', msg);
               return;
           }
-          console.error('Mapbox fatal error:', e);
           if (mounted && !mapLoaded) {
-             // Only set error if we haven't successfully loaded yet
              setError("Failed to load map data. Check connection.");
              setInitializing(false);
           }
@@ -152,17 +169,8 @@ const MapContainer: React.FC<MapContainerProps> = ({
         });
 
       } catch (err: any) {
-        const msg = err.message || '';
-        console.error("Map initialization critical failure:", err);
-        if (mounted) {
-           // Provide a user-friendly error message if it's a security block
-           if (msg.includes('Blocked a frame') || msg.includes('Location')) {
-             setError("Browser security prevented map loading. Please open in a new tab.");
-           } else {
-             setError(msg || "Failed to initialize map");
-           }
-        }
         setInitializing(false);
+        setError(err.message || "Failed to initialize map");
       }
     };
 
@@ -173,7 +181,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
       if (mapRef.current) {
          try {
            mapRef.current.remove();
-         } catch(e) { /* ignore cleanup errors */ }
+         } catch(e) { }
       }
       mapRef.current = null;
     };
@@ -192,6 +200,8 @@ const MapContainer: React.FC<MapContainerProps> = ({
                if (!map.getLayer('3d-buildings')) {
                  add3DBuildings(map);
                }
+               // Re-add price layer after style switch because switch removes all layers
+               addPriceLayer(map, showPrices);
                updateFog(map, styleId);
             }
         } catch(e) { console.warn("Style update error", e); }
@@ -209,7 +219,6 @@ const MapContainer: React.FC<MapContainerProps> = ({
   // Handle Landmark Selection (FlyTo)
   useEffect(() => {
     if (!mapRef.current || !selectedLandmark) return;
-
     try {
         mapRef.current.flyTo({
           center: [selectedLandmark.coordinates.lng, selectedLandmark.coordinates.lat],
@@ -219,14 +228,28 @@ const MapContainer: React.FC<MapContainerProps> = ({
           duration: 2000,
           essential: true
         });
-    } catch(e) {
-        console.warn("FlyTo failed", e);
-    }
+    } catch(e) {}
   }, [selectedLandmark]);
+
+  // Handle Price Layer Visibility
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+    const map = mapRef.current;
+    
+    if (map.getLayer('community-blocks')) {
+      map.setLayoutProperty(
+        'community-blocks', 
+        'visibility', 
+        showPrices ? 'visible' : 'none'
+      );
+    } else if (showPrices) {
+      // If layer missing but requested (rare case), add it
+      addPriceLayer(map, true);
+    }
+  }, [showPrices, mapLoaded]);
 
   const updateFog = (map: any, style: MapStyle) => {
       try {
-          // v2 API for Fog
           if (style.includes('night') || style.includes('satellite') || style.includes('dark')) {
             map.setFog({
                 'range': [0.8, 8],
@@ -240,7 +263,56 @@ const MapContainer: React.FC<MapContainerProps> = ({
                 "horizon-blend": 0.2
             }); 
           }
-      } catch (e) { console.log('Fog update skipped', e); }
+      } catch (e) { }
+  };
+
+  const addPriceLayer = (map: any, isVisible: boolean) => {
+    try {
+      if (map.getSource('communities')) {
+        if (!map.getLayer('community-blocks')) {
+           // If source exists but layer doesn't (weird state), proceed to add layer
+        } else {
+           // Already exists, just update visibility
+           map.setLayoutProperty('community-blocks', 'visibility', isVisible ? 'visible' : 'none');
+           return;
+        }
+      } else {
+         map.addSource('communities', {
+           type: 'geojson',
+           data: COMMUNITY_DATA
+         });
+      }
+
+      if (!map.getLayer('community-blocks')) {
+        map.addLayer({
+          'id': 'community-blocks',
+          'type': 'fill-extrusion',
+          'source': 'communities',
+          'layout': {
+            'visibility': isVisible ? 'visible' : 'none'
+          },
+          'paint': {
+            // Height based on price: price * 0.005 (e.g., 50k -> 250m)
+            'fill-extrusion-height': [
+               '*', ['get', 'price'], 0.005
+            ],
+            // Color ramp: Green (30k) -> Yellow (60k) -> Red (100k+)
+            'fill-extrusion-color': [
+              'interpolate',
+              ['linear'],
+              ['get', 'price'],
+              30000, '#10b981', // Emerald 500
+              60000, '#eab308', // Yellow 500
+              100000, '#ef4444' // Red 500
+            ],
+            'fill-extrusion-base': 0,
+            'fill-extrusion-opacity': 0.9
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("Could not add price layer", e);
+    }
   };
 
   const add3DBuildings = (map: any) => {
@@ -295,7 +367,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
                           13.05,
                           ['get', 'min_height']
                       ],
-                      'fill-extrusion-opacity': 0.9
+                      'fill-extrusion-opacity': 0.5 // Reduce opacity to let price blocks stand out
                   }
               },
               labelLayerId
